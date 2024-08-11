@@ -72,7 +72,7 @@ impl Miner {
             )
             .unwrap(),
         );
-        self.send_and_confirm(&ixs, ComputeBudget::Fixed(CU_LIMIT_CLAIM), false)
+        self.send_and_confirm(&ixs, ComputeBudget::Fixed(CU_LIMIT_CLAIM), false, None)
             .await
             .ok();
     }

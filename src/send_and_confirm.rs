@@ -28,8 +28,8 @@ const _SIMULATION_RETRIES: usize = 4;
 const GATEWAY_RETRIES: usize = 150;
 const CONFIRM_RETRIES: usize = 8;
 
-const CONFIRM_DELAY: u64 = 500;
-const GATEWAY_DELAY: u64 = 0; //300;
+const CONFIRM_DELAY: u64 = 10;
+const GATEWAY_DELAY: u64 = 300; //300;
 
 pub enum ComputeBudget {
     Dynamic,
@@ -42,6 +42,7 @@ impl Miner {
         ixs: &[Instruction],
         compute_budget: ComputeBudget,
         skip_confirm: bool,
+        difficulty: Option<u32>,  // 可选新增的参数
     ) -> ClientResult<Signature> {
         let signer = self.signer();
         let client = self.rpc_client.clone();
@@ -80,6 +81,7 @@ impl Miner {
         };
         let mut tx = Transaction::new_with_payer(&final_ixs, Some(&fee_payer.pubkey()));
 
+        let fee_difficulty = difficulty.unwrap_or(0);
         // Submit tx
         let progress_bar = spinner::new_progress_bar();
         let mut attempts = 0;
@@ -90,7 +92,7 @@ impl Miner {
             if attempts % 10 == 0 {
                 // Reset the compute unit price
                 if self.dynamic_fee {
-                    let fee = match self.dynamic_fee().await {
+                    let fee = match self.dynamic_fee(fee_difficulty).await {
                         Ok(fee) => {
                             progress_bar.println(format!("  Priority fee: {} microlamports", fee));
                             fee

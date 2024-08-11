@@ -14,7 +14,7 @@ enum FeeStrategy {
 }
 
 impl Miner {
-    pub async fn dynamic_fee(&self) -> Result<u64, String> {
+    pub async fn dynamic_fee(&self, difficulty:u32) -> Result<u64, String> {
         // Get url
         let rpc_url = self
             .dynamic_fee_url
@@ -147,10 +147,16 @@ impl Miner {
         match calculated_fee {
             Err(err) => Err(err),
             Ok(fee) => {
-                if let Some(max_fee) = self.priority_fee {
-                    Ok(fee.min(max_fee))
-                } else {
-                    Ok(fee)
+                if difficulty >= 27 {
+                    // 如果难度大于等于27，直接返回 fee 的 2 倍
+                    Ok((fee * 2) as u64)
+                }
+                else {
+                    if let Some(max_fee) = self.priority_fee {
+                        Ok(fee.min(max_fee))
+                    } else {
+                        Ok(fee)
+                    }
                 }
             }
         }
