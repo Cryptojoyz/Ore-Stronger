@@ -52,8 +52,9 @@ cargo build --release
 
 Ore采用迟到惩罚机制，每超时一分钟，奖励**减半**，不足一分钟的超时秒数按照如下公式计算奖励削减。
 
-$\begin{align*}\text{penalty} = \frac{\text{reward}}{2} \times \frac{\text{remainder_secs}}{\text{ONE_MINUTE}}\\\text{reward} = \text{reward} - \text{penalty}\end{align*}$
 
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">  <mtext>penalty</mtext>  <mo>=</mo>  <mfrac>    <mtext>reward</mtext>    <mn>2</mn>  </mfrac>  <mo>&#xD7;</mo>  <mfrac>    <mtext>remainder_secs</mtext>    <mtext>ONE_MINUTE</mtext>  </mfrac></math>
 
+<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">  <mtext>reward</mtext>  <mo>=</mo>  <mtext>reward</mtext>  <mo>&#x2212;</mo>  <mtext>penalty</mtext></math>
 
 
