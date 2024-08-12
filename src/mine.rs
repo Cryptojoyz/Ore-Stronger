@@ -189,7 +189,7 @@ impl Miner {
                     let mut memory = equix::SolverMemory::new();
                     let mut rng = rand::thread_rng();
                     let second_random_offset: u64 = if fight_again == 1 {
-                        rng.gen_range(20000..60000)
+                        rng.gen_range(20000..(u64::MAX / (cores * cores)))
                     } else {
                         0
                     };
