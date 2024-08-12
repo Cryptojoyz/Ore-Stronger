@@ -1,7 +1,4 @@
 use std::{sync::Arc, sync::RwLock, time::Instant};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash as StdHash, Hasher};
-
 use colored::*;
 use drillx::{
     equix::{self},
@@ -26,13 +23,6 @@ use crate::{
     Miner,
 };
 
-fn hash_combine<T: StdHash>(seed: u64, value: T) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    seed.hash(&mut hasher);
-    value.hash(&mut hasher);
-    hasher.finish()
-}
-
 impl Miner {
     pub async fn mine(&self, args: MineArgs) {
         // Open account, if needed.
@@ -42,13 +32,14 @@ impl Miner {
         // Check num threads
         self.check_num_cores(args.cores);
 
+        // Start mining loop
+        let mut last_hash_at = 0;
+        let mut last_balance = 0;
         let mut best_solution = None;
         let mut highest_difficulty = 0;
         let mut interval = 100;
         let mut start_time = Instant::now(); // 初始化 start_time
-        // Start mining loop
-        let mut last_hash_at = 0;
-        let mut last_balance = 0;
+        let mut fight_again = 0;
         loop {
             // Fetch proof
             let config = get_config(&self.rpc_client).await;
@@ -71,26 +62,26 @@ impl Miner {
             last_hash_at = proof.last_hash_at;
             last_balance = proof.balance;
 
-            loop {
+           loop {
                 // Calculate cutoff time
             let cutoff_time = self.get_cutoff(proof, args.buffer_time).await;
 
             // Run drillx
             let (solution, difficulty) =
-                Self::find_hash_par(proof, cutoff_time, args.cores, config.min_difficulty as u32, interval)
+                Self::find_hash_par(proof, cutoff_time, args.cores, config.min_difficulty as u32,interval, fight_again)
                     .await;
             
             // 更新最高难度和最佳 solution
             if difficulty >= highest_difficulty {
-                    highest_difficulty = difficulty;
-                    best_solution = Some(solution.clone());
+                highest_difficulty = difficulty;
+                best_solution = Some(solution.clone());
             }
-            
+
             // 检查 best_solution 是否有值，然后打印
             if let Some(ref best_solution) = best_solution {
-                    let hashshow = best_solution.to_hash();
-                    // println!("当前最佳难度: {}", highest_difficulty);
-                    println!("  当前最好Hash: {} (难度 {})", bs58::encode(hashshow.h).into_string(), highest_difficulty);
+                let hashshow = best_solution.to_hash();
+                // println!("当前最佳难度: {}", highest_difficulty);
+                println!("  当前最好Hash: {} (难度 {})", bs58::encode(hashshow.h).into_string(), highest_difficulty);
             }
 
             if difficulty >= 18 {
@@ -99,11 +90,11 @@ impl Miner {
                 // Build instruction set
                 let mut ixs = vec![ore_api::instruction::auth(proof_pubkey(signer.pubkey()))];
                 let mut compute_budget = 500_000;
-
                 if self.should_reset(config).await && rand::thread_rng().gen_range(0..100).eq(&0) {
                     compute_budget += 100_000;
                     ixs.push(ore_api::instruction::reset(signer.pubkey()));
                 }
+
                 // Build mine ix
                 ixs.push(ore_api::instruction::mine(
                     signer.pubkey(),
@@ -111,64 +102,67 @@ impl Miner {
                     self.find_bus().await,
                     valid_solution,
                 ));
-                println!("  难度大于等于18，已提交解决方案。方案的Hash: {} (难度 {})", bs58::encode((valid_solution.to_hash()).h).into_string(), highest_difficulty);
+
                 // Submit transaction
                 let result = self.send_and_confirm(&ixs, ComputeBudget::Fixed(compute_budget), false, Some(highest_difficulty))
                     .await
                     .ok();
+
                 if let Some(_) = result {
-                    // 如果交易成功，执行操作
-                    start_time = Instant::now(); // 重置 start_time
-                    interval = 100;
+                        // 如果交易成功，执行操作
+                        start_time = Instant::now(); // 重置 start_time
+                        interval = 100;
                 }
                 highest_difficulty = 0; // 重置最高难度
                 best_solution = None; // 清空最佳 solution
+                fight_again = 0;
                 break; // 满足条件后退出内部循环
                 }
-            } 
+                
+            }
             else {
-                    if start_time.elapsed().as_secs() >= 70 {
-                        if let Some(valid_solution) = best_solution.clone() {
-                            // Build instruction set
+                if start_time.elapsed().as_secs() >= 70 {
+                    if let Some(valid_solution) = best_solution.clone(){
                         let mut ixs = vec![ore_api::instruction::auth(proof_pubkey(signer.pubkey()))];
-                        let mut compute_budget = 500_000;
+                let mut compute_budget = 500_000;
+                if self.should_reset(config).await && rand::thread_rng().gen_range(0..100).eq(&0) {
+                    compute_budget += 100_000;
+                    ixs.push(ore_api::instruction::reset(signer.pubkey()));
+                }
 
-                        if self.should_reset(config).await && rand::thread_rng().gen_range(0..100).eq(&0) {
-                            compute_budget += 100_000;
-                            ixs.push(ore_api::instruction::reset(signer.pubkey()));
-                        }
-                        // Build mine ix
-                        ixs.push(ore_api::instruction::mine(
-                            signer.pubkey(),
-                            signer.pubkey(),
-                            self.find_bus().await,
-                            valid_solution,
-                        ));
-                        println!("  时间已超过70秒，提交解决方案。方案的Hash: {} (难度 {})", bs58::encode((valid_solution.to_hash()).h).into_string(), highest_difficulty);
-                        // Submit transaction
-                        let result = self.send_and_confirm(&ixs, ComputeBudget::Fixed(compute_budget), false, Some(highest_difficulty))
-                            .await
-                            .ok();
-                        if let Some(_) = result {
-                            // 如果交易成功，执行操作
-                            start_time = Instant::now(); // 重置 start_time
-                            interval = 100;
-                        }
-                        highest_difficulty = 0; // 重置最高难度
-                        best_solution = None; // 清空最佳 solution
-                        break; // 满足条件后退出内部循环
+                // Build mine ix
+                ixs.push(ore_api::instruction::mine(
+                    signer.pubkey(),
+                    signer.pubkey(),
+                    self.find_bus().await,
+                    valid_solution,
+                ));
 
-                            }
+                // Submit transaction
+                let result = self.send_and_confirm(&ixs, ComputeBudget::Fixed(compute_budget), false, Some(highest_difficulty))
+                    .await
+                    .ok();
+
+                if let Some(_) = result {
+                        // 如果交易成功，执行操作
+                        start_time = Instant::now(); // 重置 start_time
+                        interval = 100;
+                }
+                highest_difficulty = 0; // 重置最高难度
+                best_solution = None; // 清空最佳 solution
+                fight_again = 0;
+                break; // 满足条件后退出内部循环
                     }
-                    else {
-                        interval = 5000;
-                        println!(
-                            "难度小于18, 间隔已重置为{}, 搏一搏，万一呢？",interval
-                        );
-                    }
-                        
+                }
+                else {
+                    interval = 5000;
+                    fight_again = 1;
+                    println!(
+                        "难度小于18, 间隔已重置为{}, 搏一搏，万一呢？",interval
+                    );
                 }
             }
+           }
         }
     }
 
@@ -178,6 +172,7 @@ impl Miner {
         cores: u64,
         min_difficulty: u32,
         interval: u64,
+        fight_again: u32,
     ) -> (Solution, u32) {
         // Dispatch job to each thread
         let progress_bar = Arc::new(spinner::new_progress_bar());
@@ -193,8 +188,11 @@ impl Miner {
                     let progress_bar = progress_bar.clone();
                     let mut memory = equix::SolverMemory::new();
                     let mut rng = rand::thread_rng();
-                    // 使用随机数作为变化因子
-                    let random_factor: u64 = rng.gen_range(0..u64::MAX);
+                    let second_random_offset: u64 = if fight_again == 1 {
+                        rng.gen_range(20000..60000)
+                    } else {
+                        0
+                    };
                     move || {
                         // Return if core should not be used
                         if (i.id as u64).ge(&cores) {
@@ -206,12 +204,8 @@ impl Miner {
 
                         // Start hashing
                         let timer = Instant::now();
-                        // let mut nonce = u64::MAX.saturating_div(cores).saturating_mul(i.id as u64);
-                        // let mut best_nonce = nonce;
-                        let increment = u64::MAX.saturating_div(cores);
-                        // 使用哈希函数结合 random_factor 和 increment
-                        let mut nonce = hash_combine(random_factor, increment);
-                        let mut best_nonce = nonce.saturating_mul(i.id as u64);
+                        let mut nonce = u64::MAX.saturating_div(cores).saturating_mul(i.id as u64).saturating_add(second_random_offset);
+                        let mut best_nonce = nonce;
                         let mut best_difficulty = 0;
                         let mut best_hash = Hash::default();
                         loop {
